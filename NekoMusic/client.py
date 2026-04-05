@@ -1,11 +1,10 @@
-"""NekoMusic — Pyrogram bot + assistant + PyTgCalls 3.x"""
+"""NekoMusic — Pyrogram bot + assistant + PyTgCalls"""
 
 import uvloop
 uvloop.install()
 
 from pyrogram import Client
-from pytgcalls import PyTgCalls
-from pytgcalls.types import Update
+from pytgcalls import PyTgCalls   # py-tgcalls installs as 'pytgcalls' module
 
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION, BOT_NAME, BOT_VERSION
 from logger import get_logger, attach_tg_handler
@@ -29,7 +28,7 @@ assistant = Client(
     sleep_threshold=30,
 )
 
-call = PyTgCalls(assistant, cache_duration=120)
+call = PyTgCalls(assistant)
 
 
 async def start_clients():
@@ -45,7 +44,10 @@ async def start_clients():
 
 
 async def stop_clients():
-    await call.stop()
+    try:
+        await call.stop()
+    except Exception:
+        pass
     await assistant.stop()
     await bot.stop()
     log.info("🛑 Stopped.")
