@@ -1,10 +1,11 @@
-"""NekoMusic — Pyrogram bot + assistant + PyTgCalls"""
+"""NekoMusic — Pyrogram bot + assistant + PyTgCalls 3.x"""
 
 import uvloop
 uvloop.install()
 
 from pyrogram import Client
 from pytgcalls import PyTgCalls
+from pytgcalls.types import Update
 
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION, BOT_NAME, BOT_VERSION
 from logger import get_logger, attach_tg_handler
@@ -13,13 +14,18 @@ log = get_logger("client")
 
 bot = Client(
     "NekoMusicBot",
-    api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
-    sleep_threshold=30, max_concurrent_transmissions=10,
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    sleep_threshold=30,
+    max_concurrent_transmissions=10,
 )
 
 assistant = Client(
     "NekoMusicAssistant",
-    api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION,
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=STRING_SESSION,
     sleep_threshold=30,
 )
 
