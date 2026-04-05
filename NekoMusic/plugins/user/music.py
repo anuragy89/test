@@ -1,7 +1,8 @@
 """
 NekoMusic — Music Plugin (ALL-IN-ONE)
-Uses pytgcalls GitHub master (NTgCalls) — MediaStream API
-Compatible with pyrogram==2.0.106
+py-tgcalls==2.2.11 — correct API:
+  from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
+  from pytgcalls.types.input_stream.quality import HighQualityAudio, HighQualityVideo
 """
 
 import os
@@ -10,9 +11,11 @@ import time
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery
 
-# pytgcalls GitHub master (NTgCalls based) — correct imports
+# py-tgcalls 2.2.x EXACT imports (verified from source)
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update, MediaStream
+from pytgcalls.types import Update
+from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
+from pytgcalls.types.input_stream.quality import HighQualityAudio, HighQualityVideo
 from pytgcalls.exceptions import (
     AlreadyJoinedError,
     GroupCallNotFound,
@@ -38,8 +41,6 @@ from logger import get_logger
 log = get_logger("music")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 async def _lang(chat_id: int) -> str:
     try:
         return await db.get_group_lang(chat_id)
@@ -48,20 +49,15 @@ async def _lang(chat_id: int) -> str:
 
 
 async def _err(msg: Message, key: str, lang: str, **kw):
-    """One-line error reply."""
     await msg.reply_text(get_string(key, lang, **kw), quote=True)
 
 
 async def _stream_track(chat_id: int, track: Track):
-    """
-    Stream using pytgcalls GitHub master MediaStream API.
-    MediaStream is the universal stream type in NTgCalls era.
-    """
     url = track.stream_url
-    stream = MediaStream(
-        url,
-        video_flags=MediaStream.Flags.NO_LATENCY if not track.is_video else None,
-    ) if track.is_video else MediaStream(url)
+    if track.is_video:
+        stream = AudioVideoPiped(url, HighQualityAudio(), HighQualityVideo())
+    else:
+        stream = AudioPiped(url, HighQualityAudio())
     await call.join_group_call(chat_id, stream)
 
 
@@ -115,13 +111,11 @@ async def _send_queue_card(chat_id: int, track: Track, pos: int,
     try:
         if reply_msg:
             sent = await reply_msg.reply_text(
-                caption, reply_markup=queue_card_kb(chat_id, pos), quote=True,
-            )
+                caption, reply_markup=queue_card_kb(chat_id, pos), quote=True)
         else:
             sent = await bot.send_message(
                 chat_id=chat_id, text=caption,
-                reply_markup=queue_card_kb(chat_id, pos),
-            )
+                reply_markup=queue_card_kb(chat_id, pos))
         set_card_msg_id(chat_id, pos, sent.id)
     except Exception as e:
         log.error("queue card error [%s]: %s", chat_id, e)
@@ -183,8 +177,6 @@ async def _do_skip(chat_id: int, lang: str, reply_msg: Message = None):
         if reply_msg:
             await reply_msg.reply_text(get_string("ended", lang))
 
-
-# ── Core play ─────────────────────────────────────────────────────────────────
 
 async def _core_play(msg: Message, query: str,
                      is_video: bool = False, force: bool = False):
@@ -257,15 +249,12 @@ async def _core_play(msg: Message, query: str,
         await _send_queue_card(chat_id, track, pos, reply_msg=msg)
 
 
-# ── Commands ──────────────────────────────────────────────────────────────────
-
 @bot.on_message(filters.command("play") & filters.group)
 async def cmd_play(_, msg: Message):
     q = " ".join(msg.command[1:])
     if not q and msg.reply_to_message:
         rp = msg.reply_to_message
-        q  = (rp.text or
-              (rp.audio and (rp.audio.title or rp.audio.file_name)) or "").strip()
+        q  = (rp.text or (rp.audio and (rp.audio.title or rp.audio.file_name)) or "").strip()
     await _core_play(msg, q)
 
 
@@ -296,8 +285,7 @@ async def cmd_pause(_, msg: Message):
             try:
                 await bot.edit_message_reply_markup(
                     chat_id, mid,
-                    now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
-                )
+                    now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id)))
             except Exception:
                 pass
     except Exception as e:
@@ -321,8 +309,7 @@ async def cmd_resume(_, msg: Message):
             try:
                 await bot.edit_message_reply_markup(
                     chat_id, mid,
-                    now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
-                )
+                    now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id)))
             except Exception:
                 pass
     except Exception as e:
@@ -359,9 +346,7 @@ async def cmd_queue(_, msg: Message):
     lines = []
     if cur:
         lines.append(
-            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> "
-            f"{cur.title} [{cur.duration_str}]"
-        )
+            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]")
     for t in q:
         lines.append(f"  {t.queue_pos}. {t.title} [{t.duration_str}]")
     await msg.reply_text("\n".join(lines))
@@ -371,17 +356,13 @@ async def cmd_queue(_, msg: Message):
 async def cmd_ping(_, msg: Message):
     chat_id = msg.chat.id
     is_grp  = msg.chat.type.value in ("group", "supergroup")
-    lang = (
-        await db.get_group_lang(chat_id) if is_grp
-        else await db.get_user_lang(msg.from_user.id)
-    )
-    t0   = time.monotonic()
-    sent = await msg.reply_text(f"{pe(E.PING, E.PING_ID)} Pinging...")
-    ms   = round((time.monotonic() - t0) * 1000, 2)
+    lang    = (await db.get_group_lang(chat_id) if is_grp
+               else await db.get_user_lang(msg.from_user.id))
+    t0      = time.monotonic()
+    sent    = await msg.reply_text(f"{pe(E.PING, E.PING_ID)} Pinging...")
+    ms      = round((time.monotonic() - t0) * 1000, 2)
     await sent.edit_text(get_string("ping", lang, latency=ms))
 
-
-# ── Now-playing button callbacks ──────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^vc_pause_(-?\d+)$"))
 async def cb_pause(_, cq: CallbackQuery):
@@ -393,8 +374,7 @@ async def cb_pause(_, cq: CallbackQuery):
         await call.pause_stream(chat_id)
         set_paused(chat_id, True)
         await cq.message.edit_reply_markup(
-            now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
-        )
+            now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id)))
         await cq.answer(get_string("paused", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -410,8 +390,7 @@ async def cb_resume(_, cq: CallbackQuery):
         await call.resume_stream(chat_id)
         set_paused(chat_id, False)
         await cq.message.edit_reply_markup(
-            now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
-        )
+            now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id)))
         await cq.answer(get_string("resumed", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -440,8 +419,7 @@ async def cb_shuffle(_, cq: CallbackQuery):
     ok      = shuffle_queue(chat_id)
     await cq.answer(
         get_string("shuffled", lang) if ok else "Need 2+ songs to shuffle.",
-        show_alert=not ok,
-    )
+        show_alert=not ok)
 
 
 @bot.on_callback_query(filters.regex(r"^vc_loop_(-?\d+)$"))
@@ -449,12 +427,9 @@ async def cb_loop(_, cq: CallbackQuery):
     chat_id = int(cq.matches[0].group(1))
     state   = toggle_loop(chat_id)
     await cq.message.edit_reply_markup(
-        now_playing_kb(chat_id, paused=is_paused(chat_id), loop=state)
-    )
+        now_playing_kb(chat_id, paused=is_paused(chat_id), loop=state))
     await cq.answer(f"Loop {'enabled ✅' if state else 'disabled ❌'}")
 
-
-# ── Queue card callbacks ───────────────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^q_playnow_(-?\d+)_(\d+)$"))
 async def cb_q_playnow(_, cq: CallbackQuery):
@@ -476,9 +451,8 @@ async def cb_q_skipto(_, cq: CallbackQuery):
 async def cb_q_remove(_, cq: CallbackQuery):
     chat_id = int(cq.matches[0].group(1))
     pos     = int(cq.matches[0].group(2))
-    q       = get_queue(chat_id)
     removed = False
-    for t in q:
+    for t in get_queue(chat_id):
         if t.queue_pos == pos:
             from NekoMusic.utils.queue import _state, _renumber
             _state(chat_id).queue.remove(t)
@@ -494,8 +468,6 @@ async def cb_q_remove(_, cq: CallbackQuery):
     else:
         await cq.answer("Song not found in queue.", show_alert=True)
 
-
-# ── Stream-end auto-next ───────────────────────────────────────────────────────
 
 @call.on_stream_end()
 async def on_stream_end(client: PyTgCalls, update: Update):
