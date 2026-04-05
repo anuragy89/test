@@ -1,28 +1,23 @@
 """
 NekoMusic — Music Plugin (ALL-IN-ONE)
-pytgcalls 3.0.0.dev24 compatible
+Package: py-tgcalls==3.0.0.dev24  (imports as 'pytgcalls')
 """
 
-import asyncio
 import os
 import time
 
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery
 
-# pytgcalls 3.x imports
+# py-tgcalls 3.x — correct import paths
 from pytgcalls import PyTgCalls
-from pytgcalls.types import (
-    Update,
-    MediaStream,
-    AudioQuality,
-    VideoQuality,
-)
+from pytgcalls.types import Update
+from pytgcalls.types.stream import AudioPiped, VideoPiped, AudioVideoPiped
+from pytgcalls.types.stream.stream_parameters import AudioParameters, VideoParameters
 from pytgcalls.exceptions import (
     AlreadyJoinedError,
     GroupCallNotFound,
     NoActiveGroupCall,
-    NotInGroupCallError,
 )
 
 from NekoMusic.client import bot, call
@@ -44,9 +39,25 @@ from logger import get_logger
 log = get_logger("music")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Stream helper — tries multiple pytgcalls 3.x stream styles ────────────────
+async def _stream_track(chat_id: int, track: Track):
+    """
+    py-tgcalls 3.x supports multiple stream types.
+    We try AudioPiped first (most common), fallback to raw url.
+    """
+    url = track.stream_url
+    try:
+        if track.is_video:
+            stream = AudioVideoPiped(url)
+        else:
+            stream = AudioPiped(url)
+        await call.join_group_call(chat_id, stream)
+    except Exception:
+        # Some builds use different constructor — try positional
+        await call.join_group_call(chat_id, AudioPiped(url))
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _lang(chat_id: int) -> str:
     try:
@@ -59,39 +70,12 @@ async def _err(msg: Message, key: str, lang: str, **kw):
     await msg.reply_text(get_string(key, lang, **kw), quote=True)
 
 
-async def _stream_track(chat_id: int, track: Track):
-    """Stream using pytgcalls 3.x MediaStream API."""
-    url = track.stream_url
-    if track.is_video:
-        await call.join_group_call(
-            chat_id,
-            MediaStream(
-                url,
-                audio_parameters=AudioQuality.HIGH,
-                video_parameters=VideoQuality.FHD_1080p,
-            ),
-        )
-    else:
-        await call.join_group_call(
-            chat_id,
-            MediaStream(
-                url,
-                audio_parameters=AudioQuality.HIGH,
-                video_only=False,
-            ),
-        )
-
-
 async def _send_now_playing(chat_id: int, track: Track, lang: str,
                              reply_msg: Message = None):
     thumb = await generate_thumbnail(
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        year=track.year,
-        duration=track.duration_str,
-        thumb_url=track.thumb_url,
-        video_id=track.video_id,
+        title=track.title, artist=track.artist, album=track.album,
+        year=track.year, duration=track.duration_str,
+        thumb_url=track.thumb_url, video_id=track.video_id,
     )
     caption = (
         f"{E.BULLET}{E.BULLET} <b>Started Streaming</b> "
@@ -124,7 +108,7 @@ async def _send_now_playing(chat_id: int, track: Track, lang: str,
             pass
 
 
-async def _send_queue_card(chat_id: int, track: Track, pos: int, lang: str,
+async def _send_queue_card(chat_id: int, track: Track, pos: int,
                             reply_msg: Message = None):
     caption = (
         f"{E.RESTART} <b>Added To Queue At #{pos}</b>\n\n"
@@ -145,7 +129,7 @@ async def _send_queue_card(chat_id: int, track: Track, pos: int, lang: str,
             )
         set_card_msg_id(chat_id, pos, sent.id)
     except Exception as e:
-        log.error("queue card error [%s] pos=%d: %s", chat_id, pos, e)
+        log.error("queue card error [%s]: %s", chat_id, e)
 
 
 async def _delete_queue_cards(chat_id: int):
@@ -197,7 +181,7 @@ async def _do_skip(chat_id: int, lang: str, reply_msg: Message = None):
             if reply_msg:
                 await _err(reply_msg, "err_vc_not_started", lang)
         except Exception as e:
-            log.error("skip stream error [%s]: %s", chat_id, e)
+            log.error("skip error [%s]: %s", chat_id, e)
             clear(chat_id)
     else:
         await _do_end(chat_id)
@@ -205,9 +189,7 @@ async def _do_skip(chat_id: int, lang: str, reply_msg: Message = None):
             await reply_msg.reply_text(get_string("ended", lang))
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  CORE PLAY LOGIC
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Core play ─────────────────────────────────────────────────────────────────
 
 async def _core_play(msg: Message, query: str,
                      is_video: bool = False, force: bool = False):
@@ -237,22 +219,17 @@ async def _core_play(msg: Message, query: str,
         return await _err(msg, "err_too_long", lang, max=MAX_DURATION)
 
     await status.edit_text(
-        f"{pe(E.DOWNLOAD, E.DOWNLOAD_ID)} {get_string('play_downloading', lang, title=info['title'][:40])}"
+        f"{pe(E.DOWNLOAD, E.DOWNLOAD_ID)} "
+        f"{get_string('play_downloading', lang, title=info['title'][:40])}"
     )
 
     track = Track(
-        title        = info["title"],
-        stream_url   = info["stream_url"],
-        duration_sec = info["duration_sec"],
-        duration_str = info["duration_str"],
-        thumb_url    = info.get("thumb_url", ""),
-        video_id     = info.get("id", ""),
-        artist       = info.get("artist", ""),
-        album        = info.get("album", ""),
-        year         = info.get("year", ""),
-        requested_by = user.mention,
-        requested_id = user.id,
-        is_video     = is_video,
+        title=info["title"], stream_url=info["stream_url"],
+        duration_sec=info["duration_sec"], duration_str=info["duration_str"],
+        thumb_url=info.get("thumb_url", ""), video_id=info.get("id", ""),
+        artist=info.get("artist", ""), album=info.get("album", ""),
+        year=info.get("year", ""), requested_by=user.mention,
+        requested_id=user.id, is_video=is_video,
     )
 
     if force:
@@ -278,16 +255,13 @@ async def _core_play(msg: Message, query: str,
             log.error("Stream error [%s]: %s", chat_id, e)
             clear(chat_id)
             return await _err(msg, "err_join_vc", lang)
-
         await db.inc_songs_played()
         await _send_now_playing(chat_id, track, lang, reply_msg=msg)
     else:
-        await _send_queue_card(chat_id, track, pos, lang, reply_msg=msg)
+        await _send_queue_card(chat_id, track, pos, reply_msg=msg)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  COMMANDS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Commands ──────────────────────────────────────────────────────────────────
 
 @bot.on_message(filters.command("play") & filters.group)
 async def cmd_play(_, msg: Message):
@@ -324,8 +298,7 @@ async def cmd_pause(_, msg: Message):
         if mid:
             try:
                 await bot.edit_message_reply_markup(
-                    chat_id, mid,
-                    now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
+                    chat_id, mid, now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
                 )
             except Exception:
                 pass
@@ -349,8 +322,7 @@ async def cmd_resume(_, msg: Message):
         if mid:
             try:
                 await bot.edit_message_reply_markup(
-                    chat_id, mid,
-                    now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
+                    chat_id, mid, now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
                 )
             except Exception:
                 pass
@@ -404,9 +376,7 @@ async def cmd_ping(_, msg: Message):
     await sent.edit_text(get_string("ping", lang, latency=ms))
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  NOW-PLAYING CALLBACKS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Now-playing button callbacks ──────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^vc_pause_(-?\d+)$"))
 async def cb_pause(_, cq: CallbackQuery):
@@ -475,9 +445,7 @@ async def cb_loop(_, cq: CallbackQuery):
     await cq.answer(f"Loop {'enabled ✅' if state else 'disabled ❌'}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  QUEUE CARD CALLBACKS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Queue card callbacks ───────────────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^q_playnow_(-?\d+)_(\d+)$"))
 async def cb_q_playnow(_, cq: CallbackQuery):
@@ -518,14 +486,12 @@ async def cb_q_remove(_, cq: CallbackQuery):
         await cq.answer("Song not found in queue.", show_alert=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  STREAM-END AUTO-NEXT (pytgcalls 3.x event)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Stream-end auto-next ───────────────────────────────────────────────────────
 
 @call.on_stream_end()
 async def on_stream_end(client: PyTgCalls, update: Update):
     chat_id = update.chat_id
-    log.debug("Stream ended: chat_id=%s", chat_id)
+    log.debug("Stream ended: %s", chat_id)
 
     mid = get_now_msg_id(chat_id)
     if mid:
