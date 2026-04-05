@@ -1,0 +1,15 @@
+.env
+*.session
+*.session-journal
+__pycache__/
+*.pyc
+*.pyo
+logs/
+/tmp/
+.DS_Store
+venv/
+.venv/
+dist/
+build/
+*.egg-info/
+assets/fonts/*.ttf
