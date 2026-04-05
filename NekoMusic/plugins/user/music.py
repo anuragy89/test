@@ -1,6 +1,7 @@
 """
 NekoMusic — Music Plugin (ALL-IN-ONE)
-py-tgcalls==2.2.11 — AudioPiped / VideoPiped API
+Uses pytgcalls GitHub master (NTgCalls) — MediaStream API
+Compatible with pyrogram==2.0.106
 """
 
 import os
@@ -9,11 +10,9 @@ import time
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery
 
-# py-tgcalls 2.2.x correct imports
+# pytgcalls GitHub master (NTgCalls based) — correct imports
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update
-from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
-from pytgcalls.types.input_stream.quality import HighQualityAudio, HighQualityVideo
+from pytgcalls.types import Update, MediaStream
 from pytgcalls.exceptions import (
     AlreadyJoinedError,
     GroupCallNotFound,
@@ -49,16 +48,20 @@ async def _lang(chat_id: int) -> str:
 
 
 async def _err(msg: Message, key: str, lang: str, **kw):
+    """One-line error reply."""
     await msg.reply_text(get_string(key, lang, **kw), quote=True)
 
 
 async def _stream_track(chat_id: int, track: Track):
-    """Stream using py-tgcalls 2.2.x AudioPiped/AudioVideoPiped."""
+    """
+    Stream using pytgcalls GitHub master MediaStream API.
+    MediaStream is the universal stream type in NTgCalls era.
+    """
     url = track.stream_url
-    if track.is_video:
-        stream = AudioVideoPiped(url, HighQualityAudio(), HighQualityVideo())
-    else:
-        stream = AudioPiped(url, HighQualityAudio())
+    stream = MediaStream(
+        url,
+        video_flags=MediaStream.Flags.NO_LATENCY if not track.is_video else None,
+    ) if track.is_video else MediaStream(url)
     await call.join_group_call(chat_id, stream)
 
 
@@ -261,7 +264,8 @@ async def cmd_play(_, msg: Message):
     q = " ".join(msg.command[1:])
     if not q and msg.reply_to_message:
         rp = msg.reply_to_message
-        q  = (rp.text or (rp.audio and (rp.audio.title or rp.audio.file_name)) or "").strip()
+        q  = (rp.text or
+              (rp.audio and (rp.audio.title or rp.audio.file_name)) or "").strip()
     await _core_play(msg, q)
 
 
@@ -355,7 +359,8 @@ async def cmd_queue(_, msg: Message):
     lines = []
     if cur:
         lines.append(
-            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]"
+            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> "
+            f"{cur.title} [{cur.duration_str}]"
         )
     for t in q:
         lines.append(f"  {t.queue_pos}. {t.title} [{t.duration_str}]")
@@ -366,14 +371,17 @@ async def cmd_queue(_, msg: Message):
 async def cmd_ping(_, msg: Message):
     chat_id = msg.chat.id
     is_grp  = msg.chat.type.value in ("group", "supergroup")
-    lang    = await db.get_group_lang(chat_id) if is_grp else await db.get_user_lang(msg.from_user.id)
-    t0      = time.monotonic()
-    sent    = await msg.reply_text(f"{pe(E.PING, E.PING_ID)} Pinging...")
-    ms      = round((time.monotonic() - t0) * 1000, 2)
+    lang = (
+        await db.get_group_lang(chat_id) if is_grp
+        else await db.get_user_lang(msg.from_user.id)
+    )
+    t0   = time.monotonic()
+    sent = await msg.reply_text(f"{pe(E.PING, E.PING_ID)} Pinging...")
+    ms   = round((time.monotonic() - t0) * 1000, 2)
     await sent.edit_text(get_string("ping", lang, latency=ms))
 
 
-# ── Now-playing callbacks ──────────────────────────────────────────────────────
+# ── Now-playing button callbacks ──────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^vc_pause_(-?\d+)$"))
 async def cb_pause(_, cq: CallbackQuery):
@@ -487,7 +495,7 @@ async def cb_q_remove(_, cq: CallbackQuery):
         await cq.answer("Song not found in queue.", show_alert=True)
 
 
-# ── Stream-end auto-next (py-tgcalls 2.2.x) ───────────────────────────────────
+# ── Stream-end auto-next ───────────────────────────────────────────────────────
 
 @call.on_stream_end()
 async def on_stream_end(client: PyTgCalls, update: Update):
