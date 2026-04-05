@@ -1,5 +1,6 @@
-"""NekoMusic — Pyrogram bot + assistant + PyTgCalls (GitHub master / NTgCalls)"""
+"""NekoMusic — Pyrogram bot + assistant + PyTgCalls 2.2.x"""
 
+# NOTE: GroupcallForbidden patch is applied in __main__.py before this imports
 import uvloop
 uvloop.install()
 
@@ -13,22 +14,16 @@ log = get_logger("client")
 
 bot = Client(
     "NekoMusicBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    sleep_threshold=30,
-    max_concurrent_transmissions=10,
+    api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
+    sleep_threshold=30, max_concurrent_transmissions=10,
 )
 
 assistant = Client(
     "NekoMusicAssistant",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=STRING_SESSION,
+    api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION,
     sleep_threshold=30,
 )
 
-# PyTgCalls wraps the assistant client
 call = PyTgCalls(assistant)
 
 
@@ -45,16 +40,9 @@ async def start_clients():
 
 
 async def stop_clients():
-    try:
-        await call.stop()
-    except Exception:
-        pass
-    try:
-        await assistant.stop()
-    except Exception:
-        pass
-    try:
-        await bot.stop()
-    except Exception:
-        pass
-    log.info("🛑 Stopped cleanly.")
+    for c in [call, assistant, bot]:
+        try:
+            await c.stop()
+        except Exception:
+            pass
+    log.info("🛑 Stopped.")
