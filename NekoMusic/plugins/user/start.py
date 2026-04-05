@@ -15,15 +15,16 @@ log = get_logger("start")
 
 _BANNER = os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "banner.jpg")
 
-LANG_NAMES = {"en":"🇬🇧 English","hi":"🇮🇳 Hindi","es":"🇪🇸 Español","ar":"🇸🇦 Arabic","ru":"🇷🇺 Russian"}
+LANG_NAMES = {
+    "en": "🇬🇧 English", "hi": "🇮🇳 Hindi",
+    "es": "🇪🇸 Español", "ar": "🇸🇦 Arabic", "ru": "🇷🇺 Russian",
+}
 
 
 @bot.on_message(filters.command("start") & filters.private)
 async def cmd_start_private(_, msg: Message):
     user = msg.from_user
     await db.add_user(user.id, user.first_name, user.username or "")
-    lang = await db.get_user_lang(user.id)
-
     caption = (
         f"{pe(E.WAVE, E.WAVE_ID)} <b>Hey {user.mention}!</b>\n\n"
         f"{pe(E.NEKO, E.NEKO_ID)} <b>This is {BOT_NAME}</b> — a fast &amp; powerful "
@@ -59,8 +60,8 @@ async def cmd_help(_, msg: Message):
         f"  <code>/play [name/url]</code> — Play audio\n"
         f"  <code>/vplay [name/url]</code> — Play video\n"
         f"  <code>/playforce [name/url]</code> — Skip queue &amp; play\n"
-        f"  <code>/pause</code> — Pause playback\n"
-        f"  <code>/resume</code> — Resume playback\n"
+        f"  <code>/pause</code> — Pause\n"
+        f"  <code>/resume</code> — Resume\n"
         f"  <code>/skip</code> — Skip to next\n"
         f"  <code>/end</code> — Stop &amp; clear queue\n"
         f"  <code>/queue</code> — View queue\n\n"
@@ -75,17 +76,20 @@ async def cmd_help(_, msg: Message):
 
 @bot.on_message(filters.command("lang"))
 async def cmd_lang(_, msg: Message):
-    chat = msg.chat
+    chat   = msg.chat
     is_grp = chat.type.value in ("group", "supergroup")
-    lang = await db.get_group_lang(chat.id) if is_grp else await db.get_user_lang(msg.from_user.id)
+    lang   = (
+        await db.get_group_lang(chat.id) if is_grp
+        else await db.get_user_lang(msg.from_user.id)
+    )
     name = LANG_NAMES.get(lang, lang.upper())
     await msg.reply_text(
-        f"{pe(E.GLOBE, E.GLOBE_ID)} <b>Language Settings</b>\n\nCurrent: <b>{name}</b>\nChoose new:",
+        f"{pe(E.GLOBE, E.GLOBE_ID)} <b>Language Settings</b>\n\n"
+        f"Current: <b>{name}</b>\nChoose new:",
         reply_markup=lang_kb(),
     )
 
 
-# ── Callbacks ─────────────────────────────────────────────────────────────────
 @bot.on_callback_query(filters.regex("^start_back$"))
 async def cb_start(_, cq: CallbackQuery):
     await cq.message.edit_reply_markup(start_kb())
@@ -103,12 +107,13 @@ async def cb_lang_menu(_, cq: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r"^setlang_(.+)$"))
 async def cb_setlang(_, cq: CallbackQuery):
-    code  = cq.matches[0].group(1)
-    chat  = cq.message.chat
+    code   = cq.matches[0].group(1)
+    chat   = cq.message.chat
     is_grp = chat.type.value in ("group", "supergroup")
     if is_grp:
         await db.set_group_lang(chat.id, code)
     else:
         await db.set_user_lang(cq.from_user.id, code)
-    await cq.answer(f"✅ Language set to {LANG_NAMES.get(code, code.upper())}", show_alert=True)
+    name = LANG_NAMES.get(code, code.upper())
+    await cq.answer(f"✅ Language set to {name}", show_alert=True)
     await cq.message.edit_reply_markup(lang_kb())
