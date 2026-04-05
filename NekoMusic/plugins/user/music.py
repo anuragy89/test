@@ -1,13 +1,6 @@
 """
 NekoMusic — Music Plugin (ALL-IN-ONE)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Search  : yt-search-py  (metadata + thumbnail)
-Stream  : music.xbitcode.com  (audio/video URL)
-Queue   : up to 20 songs, each with its own Telegram card (matching screenshot)
-
-Commands  : /play  /vplay  /playforce  /pause  /resume  /skip  /end  /queue  /ping
-Callbacks : now-playing buttons + per-queue-card buttons
-Auto-next : stream_end handler
+pytgcalls 3.0.0.dev24 compatible
 """
 
 import asyncio
@@ -16,12 +9,21 @@ import time
 
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery
+
+# pytgcalls 3.x imports
+from pytgcalls import PyTgCalls
+from pytgcalls.types import (
+    Update,
+    MediaStream,
+    AudioQuality,
+    VideoQuality,
+)
 from pytgcalls.exceptions import (
     AlreadyJoinedError,
     GroupCallNotFound,
     NoActiveGroupCall,
+    NotInGroupCallError,
 )
-from pytgcalls.types import AudioPiped, AudioVideoPiped, HighQualityAudio, HighQualityVideo
 
 from NekoMusic.client import bot, call
 from NekoMusic.database.db import db
@@ -29,23 +31,11 @@ from NekoMusic.locales import get_string
 from NekoMusic.utils.keyboards import now_playing_kb, queue_card_kb
 from NekoMusic.utils.musicapi import resolve
 from NekoMusic.utils.queue import (
-    Track,
-    add_track,
-    clear,
-    current,
-    force_front,
-    get_all_card_msg_ids,
-    get_loop,
-    get_now_msg_id,
-    get_queue,
-    is_paused,
-    next_track,
-    queue_len,
+    Track, add_track, force_front, next_track, current,
+    clear, get_queue, get_all_card_msg_ids,
+    is_paused, set_paused, get_loop, toggle_loop,
+    shuffle_queue, set_now_msg_id, get_now_msg_id,
     set_card_msg_id,
-    set_now_msg_id,
-    set_paused,
-    shuffle_queue,
-    toggle_loop,
 )
 from NekoMusic.utils.thumb import generate_thumbnail
 from config import E, MAX_DURATION, pe
@@ -66,28 +56,34 @@ async def _lang(chat_id: int) -> str:
 
 
 async def _err(msg: Message, key: str, lang: str, **kw):
-    """Reply with a single-line error. No fluff."""
     await msg.reply_text(get_string(key, lang, **kw), quote=True)
 
 
 async def _stream_track(chat_id: int, track: Track):
-    """Start streaming a track in the group voice chat."""
+    """Stream using pytgcalls 3.x MediaStream API."""
     url = track.stream_url
     if track.is_video:
         await call.join_group_call(
             chat_id,
-            AudioVideoPiped(url, HighQualityAudio(), HighQualityVideo()),
+            MediaStream(
+                url,
+                audio_parameters=AudioQuality.HIGH,
+                video_parameters=VideoQuality.FHD_1080p,
+            ),
         )
     else:
         await call.join_group_call(
             chat_id,
-            AudioPiped(url, HighQualityAudio()),
+            MediaStream(
+                url,
+                audio_parameters=AudioQuality.HIGH,
+                video_only=False,
+            ),
         )
 
 
 async def _send_now_playing(chat_id: int, track: Track, lang: str,
                              reply_msg: Message = None):
-    """Send the now-playing card with thumbnail and control buttons."""
     thumb = await generate_thumbnail(
         title=track.title,
         artist=track.artist,
@@ -119,7 +115,7 @@ async def _send_now_playing(chat_id: int, track: Track, lang: str,
             )
         set_now_msg_id(chat_id, sent.id)
     except Exception as e:
-        log.error("now-playing card send error [%s]: %s", chat_id, e)
+        log.error("now-playing card error [%s]: %s", chat_id, e)
     finally:
         try:
             if os.path.exists(thumb):
@@ -130,14 +126,6 @@ async def _send_now_playing(chat_id: int, track: Track, lang: str,
 
 async def _send_queue_card(chat_id: int, track: Track, pos: int, lang: str,
                             reply_msg: Message = None):
-    """
-    Send a queue card for a song — matches screenshot style:
-    ↩ Added To Queue At #N
-    ✨ Title : ...
-    🕐 Duration : ...
-    🎨 Requested by : ...
-    [▶  ⏸  ⏭  ☐]
-    """
     caption = (
         f"{E.RESTART} <b>Added To Queue At #{pos}</b>\n\n"
         f"{pe(E.SPARKLE, E.SPARKLE_ID)} <b>Title :</b> "
@@ -148,30 +136,73 @@ async def _send_queue_card(chat_id: int, track: Track, pos: int, lang: str,
     try:
         if reply_msg:
             sent = await reply_msg.reply_text(
-                caption,
-                reply_markup=queue_card_kb(chat_id, pos),
-                quote=True,
+                caption, reply_markup=queue_card_kb(chat_id, pos), quote=True,
             )
         else:
             sent = await bot.send_message(
-                chat_id=chat_id,
-                text=caption,
+                chat_id=chat_id, text=caption,
                 reply_markup=queue_card_kb(chat_id, pos),
             )
-        # Store this card's message id so we can delete it later
         set_card_msg_id(chat_id, pos, sent.id)
     except Exception as e:
-        log.error("queue card send error [%s] pos=%d: %s", chat_id, pos, e)
+        log.error("queue card error [%s] pos=%d: %s", chat_id, pos, e)
 
 
 async def _delete_queue_cards(chat_id: int):
-    """Delete all queued-song cards when queue is cleared."""
     ids = get_all_card_msg_ids(chat_id)
     if ids:
         try:
             await bot.delete_messages(chat_id, ids)
         except Exception:
             pass
+
+
+async def _do_end(chat_id: int):
+    mid = get_now_msg_id(chat_id)
+    if mid:
+        try:
+            await bot.delete_messages(chat_id, [mid])
+        except Exception:
+            pass
+    await _delete_queue_cards(chat_id)
+    try:
+        await call.leave_group_call(chat_id)
+    except Exception:
+        pass
+    clear(chat_id)
+
+
+async def _do_skip(chat_id: int, lang: str, reply_msg: Message = None):
+    mid = get_now_msg_id(chat_id)
+    if mid:
+        try:
+            await bot.delete_messages(chat_id, [mid])
+        except Exception:
+            pass
+        set_now_msg_id(chat_id, 0)
+
+    nxt = next_track(chat_id)
+    if nxt:
+        try:
+            await _stream_track(chat_id, nxt)
+            await db.inc_songs_played()
+            if nxt.card_msg_id:
+                try:
+                    await bot.delete_messages(chat_id, [nxt.card_msg_id])
+                except Exception:
+                    pass
+            await _send_now_playing(chat_id, nxt, lang, reply_msg=reply_msg)
+        except (NoActiveGroupCall, GroupCallNotFound):
+            clear(chat_id)
+            if reply_msg:
+                await _err(reply_msg, "err_vc_not_started", lang)
+        except Exception as e:
+            log.error("skip stream error [%s]: %s", chat_id, e)
+            clear(chat_id)
+    else:
+        await _do_end(chat_id)
+        if reply_msg:
+            await reply_msg.reply_text(get_string("ended", lang))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -190,13 +221,11 @@ async def _core_play(msg: Message, query: str,
 
     await db.add_group(chat_id, msg.chat.title or "")
 
-    # ── Status message ────────────────────────────────────────────────────────
     status = await msg.reply_text(
         f"{pe(E.LOADING, E.LOADING_ID)} {get_string('play_searching', lang, query=query[:50])}",
         quote=True,
     )
 
-    # ── Step 1 + 2: yt-search-py → xbitcode stream URL ───────────────────────
     info = await resolve(query, is_video=is_video)
 
     if not info:
@@ -211,7 +240,6 @@ async def _core_play(msg: Message, query: str,
         f"{pe(E.DOWNLOAD, E.DOWNLOAD_ID)} {get_string('play_downloading', lang, title=info['title'][:40])}"
     )
 
-    # ── Build Track ───────────────────────────────────────────────────────────
     track = Track(
         title        = info["title"],
         stream_url   = info["stream_url"],
@@ -227,21 +255,17 @@ async def _core_play(msg: Message, query: str,
         is_video     = is_video,
     )
 
-    # ── Add to queue ──────────────────────────────────────────────────────────
     if force:
-        # playforce: goes to front of queue, becomes next
         force_front(chat_id, track)
-        pos = 0   # treat as "play now" signal below
+        pos = 0
     else:
         pos = add_track(chat_id, track)
 
     await status.delete()
 
-    # ── Queue full ────────────────────────────────────────────────────────────
     if pos == -1:
         return await _err(msg, "err_queue_full", lang, limit=20)
 
-    # ── Play immediately ──────────────────────────────────────────────────────
     if pos == 0:
         try:
             await _stream_track(chat_id, track)
@@ -249,7 +273,7 @@ async def _core_play(msg: Message, query: str,
             clear(chat_id)
             return await _err(msg, "err_vc_not_started", lang)
         except AlreadyJoinedError:
-            pass   # already in VC; pytgcalls switches track
+            pass
         except Exception as e:
             log.error("Stream error [%s]: %s", chat_id, e)
             clear(chat_id)
@@ -257,8 +281,6 @@ async def _core_play(msg: Message, query: str,
 
         await db.inc_songs_played()
         await _send_now_playing(chat_id, track, lang, reply_msg=msg)
-
-    # ── Added to queue ────────────────────────────────────────────────────────
     else:
         await _send_queue_card(chat_id, track, pos, lang, reply_msg=msg)
 
@@ -272,9 +294,7 @@ async def cmd_play(_, msg: Message):
     q = " ".join(msg.command[1:])
     if not q and msg.reply_to_message:
         rp = msg.reply_to_message
-        q  = (rp.text or
-              (rp.audio and (rp.audio.title or rp.audio.file_name)) or
-              "").strip()
+        q  = (rp.text or (rp.audio and (rp.audio.title or rp.audio.file_name)) or "").strip()
     await _core_play(msg, q)
 
 
@@ -353,7 +373,7 @@ async def cmd_end(_, msg: Message):
     lang    = await _lang(chat_id)
     if not current(chat_id):
         return await _err(msg, "err_no_active", lang)
-    await _do_end(chat_id, lang)
+    await _do_end(chat_id)
     await msg.reply_text(get_string("ended", lang))
 
 
@@ -367,13 +387,9 @@ async def cmd_queue(_, msg: Message):
         return await _err(msg, "err_no_active", lang)
     lines = []
     if cur:
-        lines.append(
-            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]"
-        )
+        lines.append(f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]")
     for t in q:
         lines.append(f"  {t.queue_pos}. {t.title} [{t.duration_str}]")
-    if not lines:
-        return await _err(msg, "err_no_active", lang)
     await msg.reply_text("\n".join(lines))
 
 
@@ -389,62 +405,7 @@ async def cmd_ping(_, msg: Message):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  SHARED ACTIONS
-# ══════════════════════════════════════════════════════════════════════════════
-
-async def _do_skip(chat_id: int, lang: str, reply_msg: Message = None):
-    """Skip current track → advance queue or end."""
-    # Delete old now-playing card
-    mid = get_now_msg_id(chat_id)
-    if mid:
-        try:
-            await bot.delete_messages(chat_id, [mid])
-        except Exception:
-            pass
-
-    nxt = next_track(chat_id)
-    if nxt:
-        try:
-            await _stream_track(chat_id, nxt)
-            await db.inc_songs_played()
-            # Delete this track's queue card (it's now playing)
-            if nxt.card_msg_id:
-                try:
-                    await bot.delete_messages(chat_id, [nxt.card_msg_id])
-                except Exception:
-                    pass
-            await _send_now_playing(chat_id, nxt, lang, reply_msg=reply_msg)
-        except (NoActiveGroupCall, GroupCallNotFound):
-            clear(chat_id)
-            if reply_msg:
-                await _err(reply_msg, "err_vc_not_started", lang)
-        except Exception as e:
-            log.error("skip stream error [%s]: %s", chat_id, e)
-            clear(chat_id)
-    else:
-        await _do_end(chat_id, lang)
-        if reply_msg:
-            await reply_msg.reply_text(get_string("ended", lang))
-
-
-async def _do_end(chat_id: int, lang: str):
-    """Stop VC, delete all cards, clear queue."""
-    mid = get_now_msg_id(chat_id)
-    if mid:
-        try:
-            await bot.delete_messages(chat_id, [mid])
-        except Exception:
-            pass
-    await _delete_queue_cards(chat_id)
-    try:
-        await call.leave_group_call(chat_id)
-    except Exception:
-        pass
-    clear(chat_id)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  NOW-PLAYING BUTTON CALLBACKS
+#  NOW-PLAYING CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
 
 @bot.on_callback_query(filters.regex(r"^vc_pause_(-?\d+)$"))
@@ -456,9 +417,7 @@ async def cb_pause(_, cq: CallbackQuery):
     try:
         await call.pause_stream(chat_id)
         set_paused(chat_id, True)
-        await cq.message.edit_reply_markup(
-            now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
-        )
+        await cq.message.edit_reply_markup(now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id)))
         await cq.answer(get_string("paused", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -473,9 +432,7 @@ async def cb_resume(_, cq: CallbackQuery):
     try:
         await call.resume_stream(chat_id)
         set_paused(chat_id, False)
-        await cq.message.edit_reply_markup(
-            now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
-        )
+        await cq.message.edit_reply_markup(now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id)))
         await cq.answer(get_string("resumed", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -493,7 +450,7 @@ async def cb_skip(_, cq: CallbackQuery):
 async def cb_end(_, cq: CallbackQuery):
     chat_id = int(cq.matches[0].group(1))
     lang    = await _lang(chat_id)
-    await _do_end(chat_id, lang)
+    await _do_end(chat_id)
     await cq.answer(get_string("ended", lang))
 
 
@@ -519,14 +476,12 @@ async def cb_loop(_, cq: CallbackQuery):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  QUEUE CARD BUTTON CALLBACKS
+#  QUEUE CARD CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
 
 @bot.on_callback_query(filters.regex(r"^q_playnow_(-?\d+)_(\d+)$"))
 async def cb_q_playnow(_, cq: CallbackQuery):
-    """Play a queued song immediately (skip current)."""
     chat_id = int(cq.matches[0].group(1))
-    pos     = int(cq.matches[0].group(2))
     lang    = await _lang(chat_id)
     await cq.answer("▶ Playing now...")
     await _do_skip(chat_id, lang)
@@ -534,7 +489,6 @@ async def cb_q_playnow(_, cq: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r"^q_skipto_(-?\d+)_(\d+)$"))
 async def cb_q_skipto(_, cq: CallbackQuery):
-    """Skip to a specific queue position."""
     chat_id = int(cq.matches[0].group(1))
     lang    = await _lang(chat_id)
     await cq.answer(get_string("skipped", lang))
@@ -543,20 +497,16 @@ async def cb_q_skipto(_, cq: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r"^q_remove_(-?\d+)_(\d+)$"))
 async def cb_q_remove(_, cq: CallbackQuery):
-    """Remove a song from the queue."""
     chat_id = int(cq.matches[0].group(1))
     pos     = int(cq.matches[0].group(2))
-    lang    = await _lang(chat_id)
     q       = get_queue(chat_id)
     removed = False
-    for i, t in enumerate(q):
+    for t in q:
         if t.queue_pos == pos:
-            from NekoMusic.utils.queue import _state
+            from NekoMusic.utils.queue import _state, _renumber
             _state(chat_id).queue.remove(t)
-            removed = True
-            # Renumber remaining
-            from NekoMusic.utils.queue import _renumber
             _renumber(chat_id)
+            removed = True
             break
     if removed:
         await cq.answer("🗑 Removed from queue.")
@@ -569,15 +519,14 @@ async def cb_q_remove(_, cq: CallbackQuery):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  STREAM-END AUTO-NEXT
+#  STREAM-END AUTO-NEXT (pytgcalls 3.x event)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @call.on_stream_end()
-async def on_stream_end(client, update):
+async def on_stream_end(client: PyTgCalls, update: Update):
     chat_id = update.chat_id
     log.debug("Stream ended: chat_id=%s", chat_id)
 
-    # Delete old now-playing card
     mid = get_now_msg_id(chat_id)
     if mid:
         try:
@@ -598,7 +547,6 @@ async def on_stream_end(client, update):
     try:
         await _stream_track(chat_id, nxt)
         await db.inc_songs_played()
-        # Delete this track's queue card
         if nxt.card_msg_id:
             try:
                 await bot.delete_messages(chat_id, [nxt.card_msg_id])
