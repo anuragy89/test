@@ -3,7 +3,7 @@
 # ── Telegram ──────────────────────────────────────────────
 pyrogram==2.0.106
 TgCrypto==1.2.5
-pytgcalls==4.0.4
+pytgcalls==3.0.0.dev24
 
 # ── Database ──────────────────────────────────────────────
 motor==3.3.2
@@ -13,7 +13,7 @@ dnspython==2.6.1
 # ── YouTube Search (metadata + thumbnail) ─────────────────
 yt-search-py>=1.0.0
 
-# ── HTTP client (Music API stream + thumbnail fetch) ──────
+# ── HTTP client ───────────────────────────────────────────
 aiohttp==3.9.3
 aiofiles==23.2.1
 
