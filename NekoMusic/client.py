@@ -1,10 +1,10 @@
-"""NekoMusic — Pyrogram bot + assistant + PyTgCalls"""
+"""NekoMusic — Pyrogram bot + assistant + PyTgCalls 2.2.x"""
 
 import uvloop
 uvloop.install()
 
 from pyrogram import Client
-from pytgcalls import PyTgCalls   # py-tgcalls installs as 'pytgcalls' module
+from pytgcalls import PyTgCalls
 
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION, BOT_NAME, BOT_VERSION
 from logger import get_logger, attach_tg_handler
