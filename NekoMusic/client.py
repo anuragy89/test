@@ -1,4 +1,4 @@
-"""NekoMusic — Pyrogram bot + assistant + PyTgCalls 2.2.x"""
+"""NekoMusic — Pyrogram bot + assistant + PyTgCalls (GitHub master / NTgCalls)"""
 
 import uvloop
 uvloop.install()
@@ -28,6 +28,7 @@ assistant = Client(
     sleep_threshold=30,
 )
 
+# PyTgCalls wraps the assistant client
 call = PyTgCalls(assistant)
 
 
@@ -37,9 +38,9 @@ async def start_clients():
     await assistant.start()
     await call.start()
     attach_tg_handler(bot)
-    me = await bot.get_me()
-    log.info("✅ Bot → @%s", me.username)
+    me   = await bot.get_me()
     asst = await assistant.get_me()
+    log.info("✅ Bot       → @%s", me.username)
     log.info("✅ Assistant → @%s", asst.username)
 
 
@@ -48,6 +49,12 @@ async def stop_clients():
         await call.stop()
     except Exception:
         pass
-    await assistant.stop()
-    await bot.stop()
-    log.info("🛑 Stopped.")
+    try:
+        await assistant.stop()
+    except Exception:
+        pass
+    try:
+        await bot.stop()
+    except Exception:
+        pass
+    log.info("🛑 Stopped cleanly.")
