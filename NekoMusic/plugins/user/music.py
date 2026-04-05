@@ -1,6 +1,6 @@
 """
 NekoMusic — Music Plugin (ALL-IN-ONE)
-Package: py-tgcalls==3.0.0.dev24  (imports as 'pytgcalls')
+py-tgcalls==2.2.11 — AudioPiped / VideoPiped API
 """
 
 import os
@@ -9,11 +9,11 @@ import time
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery
 
-# py-tgcalls 3.x — correct import paths
+# py-tgcalls 2.2.x correct imports
 from pytgcalls import PyTgCalls
 from pytgcalls.types import Update
-from pytgcalls.types.stream import AudioPiped, VideoPiped, AudioVideoPiped
-from pytgcalls.types.stream.stream_parameters import AudioParameters, VideoParameters
+from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
+from pytgcalls.types.input_stream.quality import HighQualityAudio, HighQualityVideo
 from pytgcalls.exceptions import (
     AlreadyJoinedError,
     GroupCallNotFound,
@@ -39,24 +39,6 @@ from logger import get_logger
 log = get_logger("music")
 
 
-# ── Stream helper — tries multiple pytgcalls 3.x stream styles ────────────────
-async def _stream_track(chat_id: int, track: Track):
-    """
-    py-tgcalls 3.x supports multiple stream types.
-    We try AudioPiped first (most common), fallback to raw url.
-    """
-    url = track.stream_url
-    try:
-        if track.is_video:
-            stream = AudioVideoPiped(url)
-        else:
-            stream = AudioPiped(url)
-        await call.join_group_call(chat_id, stream)
-    except Exception:
-        # Some builds use different constructor — try positional
-        await call.join_group_call(chat_id, AudioPiped(url))
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _lang(chat_id: int) -> str:
@@ -68,6 +50,16 @@ async def _lang(chat_id: int) -> str:
 
 async def _err(msg: Message, key: str, lang: str, **kw):
     await msg.reply_text(get_string(key, lang, **kw), quote=True)
+
+
+async def _stream_track(chat_id: int, track: Track):
+    """Stream using py-tgcalls 2.2.x AudioPiped/AudioVideoPiped."""
+    url = track.stream_url
+    if track.is_video:
+        stream = AudioVideoPiped(url, HighQualityAudio(), HighQualityVideo())
+    else:
+        stream = AudioPiped(url, HighQualityAudio())
+    await call.join_group_call(chat_id, stream)
 
 
 async def _send_now_playing(chat_id: int, track: Track, lang: str,
@@ -204,7 +196,8 @@ async def _core_play(msg: Message, query: str,
     await db.add_group(chat_id, msg.chat.title or "")
 
     status = await msg.reply_text(
-        f"{pe(E.LOADING, E.LOADING_ID)} {get_string('play_searching', lang, query=query[:50])}",
+        f"{pe(E.LOADING, E.LOADING_ID)} "
+        f"{get_string('play_searching', lang, query=query[:50])}",
         quote=True,
     )
 
@@ -298,7 +291,8 @@ async def cmd_pause(_, msg: Message):
         if mid:
             try:
                 await bot.edit_message_reply_markup(
-                    chat_id, mid, now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
+                    chat_id, mid,
+                    now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
                 )
             except Exception:
                 pass
@@ -322,7 +316,8 @@ async def cmd_resume(_, msg: Message):
         if mid:
             try:
                 await bot.edit_message_reply_markup(
-                    chat_id, mid, now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
+                    chat_id, mid,
+                    now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
                 )
             except Exception:
                 pass
@@ -359,7 +354,9 @@ async def cmd_queue(_, msg: Message):
         return await _err(msg, "err_no_active", lang)
     lines = []
     if cur:
-        lines.append(f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]")
+        lines.append(
+            f"{pe(E.PLAY, E.PLAY_ID)} <b>Now Playing:</b> {cur.title} [{cur.duration_str}]"
+        )
     for t in q:
         lines.append(f"  {t.queue_pos}. {t.title} [{t.duration_str}]")
     await msg.reply_text("\n".join(lines))
@@ -376,7 +373,7 @@ async def cmd_ping(_, msg: Message):
     await sent.edit_text(get_string("ping", lang, latency=ms))
 
 
-# ── Now-playing button callbacks ──────────────────────────────────────────────
+# ── Now-playing callbacks ──────────────────────────────────────────────────────
 
 @bot.on_callback_query(filters.regex(r"^vc_pause_(-?\d+)$"))
 async def cb_pause(_, cq: CallbackQuery):
@@ -387,7 +384,9 @@ async def cb_pause(_, cq: CallbackQuery):
     try:
         await call.pause_stream(chat_id)
         set_paused(chat_id, True)
-        await cq.message.edit_reply_markup(now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id)))
+        await cq.message.edit_reply_markup(
+            now_playing_kb(chat_id, paused=True, loop=get_loop(chat_id))
+        )
         await cq.answer(get_string("paused", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -402,7 +401,9 @@ async def cb_resume(_, cq: CallbackQuery):
     try:
         await call.resume_stream(chat_id)
         set_paused(chat_id, False)
-        await cq.message.edit_reply_markup(now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id)))
+        await cq.message.edit_reply_markup(
+            now_playing_kb(chat_id, paused=False, loop=get_loop(chat_id))
+        )
         await cq.answer(get_string("resumed", lang))
     except Exception as e:
         await cq.answer(str(e)[:200], show_alert=True)
@@ -486,7 +487,7 @@ async def cb_q_remove(_, cq: CallbackQuery):
         await cq.answer("Song not found in queue.", show_alert=True)
 
 
-# ── Stream-end auto-next ───────────────────────────────────────────────────────
+# ── Stream-end auto-next (py-tgcalls 2.2.x) ───────────────────────────────────
 
 @call.on_stream_end()
 async def on_stream_end(client: PyTgCalls, update: Update):
