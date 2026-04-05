@@ -1,6 +1,8 @@
 """
 NekoMusic — Entry Point
-Run: python -m NekoMusic  OR  python __main__.py
+IMPORTANT: The pyrogram monkey-patch MUST happen before any pytgcalls import.
+py-tgcalls 2.2.11 requires GroupcallForbidden from pyrogram.errors,
+which was removed in pyrogram 2.x. We inject it here as a shim.
 """
 
 import asyncio
@@ -9,8 +11,26 @@ import importlib
 import os
 import sys
 
-# Ensure project root is on Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATCH: inject GroupcallForbidden into pyrogram.errors BEFORE pytgcalls loads
+# This is required because py-tgcalls 2.2.x was built against pyrogram 1.x
+# which had this error class. Pyrogram 2.x removed it.
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    import pyrogram.errors as _pyro_errors
+    if not hasattr(_pyro_errors, "GroupcallForbidden"):
+        from pyrogram.errors.exceptions import BadRequest as _BR
+        class GroupcallForbidden(_BR):
+            ID = "GROUPCALL_FORBIDDEN"
+            MESSAGE = "Group call forbidden"
+        _pyro_errors.GroupcallForbidden = GroupcallForbidden
+        import pyrogram.errors.exceptions
+        pyrogram.errors.exceptions.GroupcallForbidden = GroupcallForbidden
+except Exception as _e:
+    print(f"[WARN] pyrogram patch failed: {_e}")
+# ─────────────────────────────────────────────────────────────────────────────
 
 from config import (
     API_ID, API_HASH, BOT_TOKEN, STRING_SESSION,
@@ -21,22 +41,18 @@ from logger import LOGGER as log
 
 def _check_env():
     required = {
-        "API_ID": API_ID,
-        "API_HASH": API_HASH,
-        "BOT_TOKEN": BOT_TOKEN,
-        "STRING_SESSION": STRING_SESSION,
-        "MONGO_URI": MONGO_URI,
-        "OWNER_ID": OWNER_ID,
+        "API_ID": API_ID, "API_HASH": API_HASH,
+        "BOT_TOKEN": BOT_TOKEN, "STRING_SESSION": STRING_SESSION,
+        "MONGO_URI": MONGO_URI, "OWNER_ID": OWNER_ID,
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
-        log.critical("❌ Missing required environment variables: %s", ", ".join(missing))
+        log.critical("❌ Missing env vars: %s", ", ".join(missing))
         sys.exit(1)
 
 
 def _load_plugins():
-    """Auto-import every plugin module from plugins/user and plugins/owner."""
-    loaded, failed = 0, 0
+    loaded = fail = 0
     patterns = [
         "NekoMusic/plugins/user/*.py",
         "NekoMusic/plugins/owner/*.py",
@@ -46,7 +62,6 @@ def _load_plugins():
             filename = os.path.basename(filepath)
             if filename.startswith("_"):
                 continue
-            # Convert path to dotted module name
             module = filepath.replace(os.sep, ".")[:-3]
             try:
                 importlib.import_module(module)
@@ -54,8 +69,11 @@ def _load_plugins():
                 loaded += 1
             except Exception as exc:
                 log.error("  ❌ Plugin failed [%s]: %s", module, exc)
-                failed += 1
-    log.info("📦 Plugins: %d loaded, %d failed", loaded, failed)
+                fail += 1
+    log.info("📦 Plugins: %d loaded, %d failed", loaded, fail)
+    if fail > 0 and loaded == 0:
+        log.critical("All plugins failed to load. Exiting.")
+        sys.exit(1)
 
 
 async def main():
@@ -66,28 +84,24 @@ async def main():
     _check_env()
     os.makedirs(CACHE_DIR, exist_ok=True)
 
-    # Connect MongoDB
     from NekoMusic.database.db import db
     await db.connect()
 
-    # Load all plugins BEFORE starting clients
-    # (plugins register handlers at import time)
     _load_plugins()
 
-    # Start Pyrogram bot + assistant + PyTgCalls
     from NekoMusic.client import start_clients, stop_clients
     await start_clients()
 
-    log.info("🟢  %s is LIVE — Press Ctrl+C to stop", BOT_NAME)
+    log.info("🟢  %s is LIVE!", BOT_NAME)
 
     try:
-        await asyncio.Event().wait()          # run forever
+        await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
         log.info("🔴  Shutdown signal received")
     finally:
         await stop_clients()
         await db.close()
-        log.info("👋  %s stopped cleanly", BOT_NAME)
+        log.info("👋  %s stopped.", BOT_NAME)
 
 
 if __name__ == "__main__":
