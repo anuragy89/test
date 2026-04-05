@@ -10,7 +10,11 @@ from pyrogram.types import Message
 
 from NekoMusic.client import bot
 from NekoMusic.database.db import db
-from config import E, pe, OWNER_ID, SUDO_USERS, HEROKU_APP_NAME, HEROKU_API_KEY, BOT_VERSION, BOT_NAME
+from config import (
+    E, pe, OWNER_ID, SUDO_USERS,
+    HEROKU_APP_NAME, HEROKU_API_KEY,
+    BOT_VERSION, BOT_NAME,
+)
 from logger import get_logger
 
 log = get_logger("owner")
@@ -19,14 +23,21 @@ _START = time.time()
 
 def _uptime() -> str:
     s = int(time.time() - _START)
-    m, s = divmod(s, 60); h, m = divmod(m, 60); d, h = divmod(h, 24)
-    return " ".join(filter(None, [f"{d}d" if d else "", f"{h}h" if h else "",
-                                  f"{m}m" if m else "", f"{s}s"]))
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
 
 
 def _is_owner(_, __, msg: Message) -> bool:
     uid = msg.from_user.id if msg.from_user else 0
     return uid == OWNER_ID or uid in SUDO_USERS
+
 
 _owner = filters.create(_is_owner)
 
@@ -38,13 +49,13 @@ async def cmd_stats(_, msg: Message):
     cpu   = psutil.cpu_percent(interval=0.5)
     await msg.reply_text(
         f"{pe(E.CROWN, E.CROWN_ID)} <b>{BOT_NAME} Statistics</b>\n\n"
-        f"{pe(E.USER, E.USER_ID)}  <b>Users :</b>        <code>{stats['total_users']}</code>\n"
-        f"{pe(E.GROUP, E.GROUP_ID)} <b>Groups :</b>      <code>{stats['total_groups']}</code>\n"
-        f"{pe(E.MUSIC, E.MUSIC_ID)} <b>Songs Played :</b><code>{stats['songs_played']}</code>\n\n"
+        f"{pe(E.USER, E.USER_ID)}  <b>Users :</b>         <code>{stats['total_users']}</code>\n"
+        f"{pe(E.GROUP, E.GROUP_ID)} <b>Groups :</b>       <code>{stats['total_groups']}</code>\n"
+        f"{pe(E.MUSIC, E.MUSIC_ID)} <b>Songs Played :</b> <code>{stats['songs_played']}</code>\n\n"
         f"{pe(E.LIGHTNING, E.LIGHTNING_ID)} <b>Uptime :</b>  <code>{_uptime()}</code>\n"
-        f"{pe(E.STATS, E.STATS_ID)} <b>RAM :</b>         <code>{ram} MB</code>\n"
+        f"{pe(E.STATS, E.STATS_ID)} <b>RAM :</b>          <code>{ram} MB</code>\n"
         f"⚙️  <b>CPU :</b>          <code>{cpu}%</code>\n"
-        f"{pe(E.ROBOT, E.ROBOT_ID)} <b>Version :</b>    <code>v{BOT_VERSION}</code>"
+        f"{pe(E.ROBOT, E.ROBOT_ID)} <b>Version :</b>     <code>v{BOT_VERSION}</code>"
     )
 
 
@@ -74,7 +85,9 @@ async def cmd_broadcast(_, msg: Message):
     if mode in ("group", "both"):
         targets += [("g", g["chat_id"]) for g in await db.get_all_groups()]
 
-    status = await msg.reply_text(f"{pe(E.BROADCAST, E.BROADCAST_ID)} Broadcasting to <b>{len(targets)}</b> chats...")
+    status = await msg.reply_text(
+        f"{pe(E.BROADCAST, E.BROADCAST_ID)} Broadcasting to <b>{len(targets)}</b> chats..."
+    )
     ok = fail = 0
     for i, (_, cid) in enumerate(targets):
         try:
@@ -99,8 +112,13 @@ async def cmd_broadcast(_, msg: Message):
 @bot.on_message(filters.command("restart") & _owner)
 async def cmd_restart(_, msg: Message):
     if not HEROKU_APP_NAME or not HEROKU_API_KEY:
-        return await msg.reply_text(f"{E.WARNING} <code>HEROKU_APP_NAME</code> or <code>HEROKU_API_KEY</code> not set.")
-    await msg.reply_text(f"{pe(E.RESTART, E.RESTART_ID)} <b>Restarting {BOT_NAME}...</b>\n<i>Back in a moment! 🐱</i>")
+        return await msg.reply_text(
+            f"{E.WARNING} <code>HEROKU_APP_NAME</code> or <code>HEROKU_API_KEY</code> not set."
+        )
+    await msg.reply_text(
+        f"{pe(E.RESTART, E.RESTART_ID)} <b>Restarting {BOT_NAME}...</b>\n"
+        f"<i>Back in a moment! 🐱</i>"
+    )
     try:
         import heroku3
         heroku3.from_key(HEROKU_API_KEY).app(HEROKU_APP_NAME).restart()
