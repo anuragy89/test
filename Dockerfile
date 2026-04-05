@@ -1,23 +1,24 @@
 FROM python:3.11-slim
 
-# Install system dependencies + FFmpeg
+# Install system deps + FFmpeg + git (needed for git pip install)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     wget \
+    build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements first (layer cache)
+# Install Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy all project files
+# Copy project
 COPY . .
 
-# Create cache dir
+# Create cache directory
 RUN mkdir -p /tmp/neko_cache
 
 CMD ["python", "__main__.py"]
