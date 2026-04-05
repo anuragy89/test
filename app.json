@@ -1,0 +1,116 @@
+{
+  "name": "NekoMusic",
+  "description": "🐱 NekoMusic — Fast Telegram Voice Chat Music Bot",
+  "keywords": ["telegram", "music", "bot", "voice-chat", "pytgcalls"],
+  "repository": "https://github.com/YourUsername/NekoMusic",
+
+  "env": {
+    "API_ID": {
+      "description": "Telegram API ID — https://my.telegram.org",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Telegram API Hash — https://my.telegram.org",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Bot token from @BotFather",
+      "required": true
+    },
+    "STRING_SESSION": {
+      "description": "Pyrogram string session for assistant account (run generate_session.py)",
+      "required": true
+    },
+    "MONGO_URI": {
+      "description": "MongoDB connection URI (MongoDB Atlas free tier works)",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram user ID (get from @userinfobot)",
+      "required": true
+    },
+    "BOT_USERNAME": {
+      "description": "Bot username WITHOUT the @ symbol",
+      "required": true
+    },
+    "MUSIC_API_BASE": {
+      "description": "Music stream API base URL",
+      "value": "https://music.xbitcode.com",
+      "required": false
+    },
+    "YT_PROXY_URL": {
+      "description": "HTTP proxy for music API calls (optional) — e.g. http://user:pass@host:port",
+      "value": "",
+      "required": false
+    },
+    "SUDO_USERS": {
+      "description": "Space-separated Telegram user IDs with owner access (optional)",
+      "value": "",
+      "required": false
+    },
+    "SUPPORT_CHAT": {
+      "description": "Your support group link",
+      "value": "https://t.me/YourSupport",
+      "required": false
+    },
+    "UPDATES_CHANNEL": {
+      "description": "Your updates channel link",
+      "value": "https://t.me/YourChannel",
+      "required": false
+    },
+    "SOURCE_CODE": {
+      "description": "GitHub repo link",
+      "value": "https://github.com/YourUsername/NekoMusic",
+      "required": false
+    },
+    "HEROKU_APP_NAME": {
+      "description": "Heroku app name — enables /restart command",
+      "value": "",
+      "required": false
+    },
+    "HEROKU_API_KEY": {
+      "description": "Heroku API key — enables /restart command",
+      "value": "",
+      "required": false
+    },
+    "LOG_GROUP_ID": {
+      "description": "Telegram group ID to forward error logs (0 = disabled)",
+      "value": "0",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Logging verbosity: DEBUG | INFO | WARNING | ERROR",
+      "value": "INFO",
+      "required": false
+    },
+    "MAX_DURATION": {
+      "description": "Maximum allowed song duration in minutes",
+      "value": "180",
+      "required": false
+    },
+    "QUEUE_LIMIT": {
+      "description": "Max songs in queue per group (up to 20)",
+      "value": "20",
+      "required": false
+    },
+    "DEFAULT_LANGUAGE": {
+      "description": "Default language: en | hi | es | ar | ru",
+      "value": "en",
+      "required": false
+    }
+  },
+
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "standard-2x"
+    }
+  },
+
+  "buildpacks": [
+    { "url": "heroku/python" },
+    { "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git" }
+  ],
+
+  "stack": "heroku-22"
+}
